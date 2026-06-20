@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feature Flag Engine</title>
+<style>
+  :root {
+    --bg:      #0f1117;
+    --surface: #1a1d27;
+    --border:  #2a2d3e;
+    --text:    #e2e8f0;
+    --muted:   #64748b;
+    --on:      #22c55e;
+    --off:     #ef4444;
+    --accent:  #6366f1;
+    --warn:    #f59e0b;
+    --radius:  8px;
+    --mono:    'JetBrains Mono', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; min-height: 100vh;
+  }
+
+  /* ── Layout ── */
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+    position: sticky; top: 0; z-index: 100;
+  }
+  header h1 { font-size: 16px; font-weight: 700; letter-spacing: -.3px; }
+  .ws-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--off); transition: background .3s;
+  }
+  .ws-dot.connected { background: var(--on); }
+  .ws-label { color: var(--muted); font-size: 12px; }
+
+  .tabs {
+    display: flex; gap: 2px; padding: 0 24px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .tab {
+    padding: 10px 18px; cursor: pointer; color: var(--muted);
+    font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent;
+    transition: color .15s, border-color .15s; user-select: none;
+  }
+  .tab.active { color: var(--text); border-color: var(--accent); }
+
+  main { padding: 24px; max-width: 1100px; }
+
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  /* ── Toolbar ── */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 16px; flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 7px 14px; border-radius: var(--radius); border: none;
+    font-size: 13px; font-weight: 500; cursor: pointer;
+    transition: opacity .15s; white-space: nowrap;
+  }
+  .btn:hover { opacity: .85; }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-ghost {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover { color: var(--text); }
+  .btn-danger { background: #7f1d1d; color: #fca5a5; }
+
+  .search {
+    flex: 1; min-width: 180px;
+    padding: 7px 12px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); font-size: 13px; outline: none;
+  }
+  .search:focus { border-color: var(--accent); }
+
+  /* ── Cards / Table ── */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+  }
+  .flag-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px;
+    transition: border-color .15s;
+  }
+  .flag-card:hover { border-color: var(--accent); }
+  .flag-card.enabled  { border-left: 3px solid var(--on); }
+  .flag-card.disabled { border-left: 3px solid var(--off); }
+
+  .flag-header {
+    display: flex; align-items: center;
+    justify-content: space-between; gap: 10px; margin-bottom: 8px;
+  }
+  .flag-name { font-weight: 600; font-family: var(--mono); font-size: 13px; }
+  .toggle {
+    position: relative; width: 40px; height: 22px;
+    flex-shrink: 0; cursor: pointer;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; inset: 0; background: #374151;
+    border-radius: 22px; transition: background .2s;
+  }
+  .slider:before {
+    content: ''; position: absolute;
+    height: 16px; width: 16px; left: 3px; top: 3px;
+    background: white; border-radius: 50%;
+    transition: transform .2s;
+  }
+  input:checked + .slider { background: var(--accent); }
+  input:checked + .slider:before { transform: translateX(18px); }
+
+  .flag-meta { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+  .badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    font-weight: 500; white-space: nowrap;
+  }
+  .badge-everyone { background: #1e3a5f; color: #93c5fd; }
+  .badge-beta     { background: #3b1f6e; color: #c4b5fd; }
+  .badge-pct      { background: #422006; color: #fbbf24; }
+  .badge-users    { background: #064e3b; color: #6ee7b7; }
+  .flag-desc { color: var(--muted); font-size: 12px; }
+
+  .flag-actions { display: flex; gap: 6px; margin-top: 12px; }
+  .flag-actions .btn { padding: 4px 10px; font-size: 12px; }
+
+  /* ── Config table ── */
+  table {
+    width: 100%; border-collapse: collapse;
+    background: var(--surface); border-radius: var(--radius);
+    overflow: hidden;
+  }
+  th {
+    background: #12141e; color: var(--muted);
+    font-size: 11px; font-weight: 600; letter-spacing: .5px;
+    text-transform: uppercase; padding: 10px 14px; text-align: left;
+  }
+  td { padding: 10px 14px; border-top: 1px solid var(--border); }
+  tr:hover td { background: rgba(255,255,255,.02); }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .type-badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 4px;
+    font-family: var(--mono); font-weight: 600;
+  }
+  .type-string  { background: #1e3a5f; color: #93c5fd; }
+  .type-number  { background: #422006; color: #fbbf24; }
+  .type-boolean { background: #064e3b; color: #6ee7b7; }
+
+  /* ── Audit log ── */
+  .audit-list { display: flex; flex-direction: column; gap: 6px; }
+  .audit-entry {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 10px 14px;
+  }
+  .audit-ts { color: var(--muted); font-family: var(--mono); font-size: 11px; min-width: 145px; }
+  .audit-action {
+    font-size: 11px; font-weight: 700; padding: 1px 8px;
+    border-radius: 4px; text-transform: uppercase;
+  }
+  .act-created { background:#14532d; color:#4ade80; }
+  .act-updated { background:#422006; color:#fbbf24; }
+  .act-deleted { background:#7f1d1d; color:#fca5a5; }
+  .audit-name { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+  .audit-changes { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.65);
+    display: none; align-items: center; justify-content: center; z-index: 200;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; width: 100%; max-width: 500px;
+    max-height: 90vh; overflow-y: auto;
+  }
+  .modal h2 { font-size: 15px; font-weight: 700; margin-bottom: 18px; }
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+  .field label { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .field input, .field select, .field textarea {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); padding: 8px 10px;
+    font-size: 13px; outline: none;
+  }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
+
+  /* ── Empty state ── */
+  .empty {
+    text-align: center; padding: 60px 20px; color: var(--muted);
+  }
+  .empty .icon { font-size: 40px; margin-bottom: 12px; }
+
+  /* ── Stats bar ── */
+  .stats { display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 18px;
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .stat-val { font-size: 22px; font-weight: 700; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+  .val-on  { color: var(--on); }
+  .val-off { color: var(--off); }
+  .val-total { color: var(--accent); }
+
+  .toast-container {
+    position: fixed; bottom: 24px; right: 24px;
+    display: flex; flex-direction: column; gap: 8px; z-index: 300;
+  }
+  .toast {
+    background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius); padding: 10px 16px;
+    font-size: 13px; animation: slideIn .2s ease;
+    max-width: 300px;
+  }
+  @keyframes slideIn {
+    from { transform: translateX(120%); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+
+  .spinner {
+    width: 16px; height: 16px; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .6s linear infinite; display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:20px">🚩</span>
+  <h1>Feature Flag Engine</h1>
+  <div class="ws-dot" id="wsDot"></div>
+  <span class="ws-label" id="wsLabel">connecting…</span>
+  <div style="flex:1"></div>
+  <button class="btn btn-ghost" onclick="doExport()">⬇ Export</button>
+</header>
+
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('flags',this)">🚩 Feature Flags</div>
+  <div class="tab" onclick="switchTab('configs',this)">⚙️ Remote Configs</div>
+  <div class="tab" onclick="switchTab('audit',this)">📋 Audit Log</div>
+</div>
+
+<main>
+
+<!-- ── Flags panel ── -->
+<div id="panel-flags" class="panel active">
+  <div class="stats" id="flagStats"></div>
+  <div class="toolbar">
+    <input class="search" id="flagSearch" placeholder="🔍  Search flags…"
+           oninput="renderFlags()">
+    <button class="btn btn-primary" onclick="openFlagModal()">＋ New Flag</button>
+    <button class="btn btn-ghost" onclick="loadAll()">↺ Refresh</button>
+  </div>
+  <div class="card-grid" id="flagGrid"></div>
+</div>
+
+<!-- ── Configs panel ── -->
+<div id="panel-configs" class="panel">
+  <div class="toolbar">
+    <input class="search" id="cfgSearch" placeholder="🔍  Search configs…"
+           oninput="renderConfigs()">
+    <button class="btn btn-primary" onclick="openCfgModal()">＋ New Config</button>
+    <button class="btn btn-ghost" onclick="loadAll()">↺ Refresh</button>
+  </div>
+  <table id="cfgTable">
+    <thead>
+      <tr>
+        <th>Key</th><th>Value</th><th>Type</th><th>Description</th>
+        <th>Updated</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="cfgBody"></tbody>
+  </table>
+</div>
+
+<!-- ── Audit panel ── -->
+<div id="panel-audit" class="panel">
+  <div class="toolbar">
+    <button class="btn btn-ghost" onclick="loadAudit()">↺ Refresh</button>
+    <span id="auditCount" style="color:var(--muted);font-size:13px"></span>
+  </div>
+  <div class="audit-list" id="auditList"></div>
+</div>
+
+</main>
+
+<!-- ── Toast container ── -->
+<div class="toast-container" id="toasts"></div>
+
+<!-- ── Flag modal ── -->
+<div class="modal-overlay" id="flagModal">
+  <div class="modal">
+    <h2 id="flagModalTitle">New Feature Flag</h2>
+    <div class="field" id="nameField">
+      <label>Name *</label>
+      <input id="fName" placeholder="e.g. new_checkout_flow">
+    </div>
+    <div class="field">
+      <label>Description</label>
+      <input id="fDesc" placeholder="Optional description">
+    </div>
+    <div class="field">
+      <label>Targeting Rule</label>
+      <select id="fTargeting" onchange="onTargetingChange()">
+        <option value="everyone">Everyone</option>
+        <option value="beta_users">Beta Users Only</option>
+        <option value="percentage">Percentage Rollout</option>
+        <option value="user_ids">Specific User IDs</option>
+      </select>
+    </div>
+    <div class="field" id="pctField" style="display:none">
+      <label>Percentage (0 – 100)</label>
+      <input id="fPct" type="number" min="0" max="100" placeholder="e.g. 10">
+    </div>
+    <div class="field" id="uidsField" style="display:none">
+      <label>User IDs (comma-separated)</label>
+      <input id="fUids" placeholder="alice, bob, charlie">
+    </div>
+    <div class="field">
+      <label>Enabled</label>
+      <select id="fEnabled">
+        <option value="false">Off</option>
+        <option value="true">On</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeFlagModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitFlag()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Config modal ── -->
+<div class="modal-overlay" id="cfgModal">
+  <div class="modal">
+    <h2 id="cfgModalTitle">New Remote Config</h2>
+    <div class="field" id="cfgKeyField">
+      <label>Key *</label>
+      <input id="cKey" placeholder="e.g. welcome_message">
+    </div>
+    <div class="field">
+      <label>Value *</label>
+      <input id="cValue" placeholder="e.g. Hello, World!">
+    </div>
+    <div class="field">
+      <label>Type</label>
+      <select id="cType">
+        <option value="string">String</option>
+        <option value="number">Number</option>
+        <option value="boolean">Boolean</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Description</label>
+      <input id="cDesc" placeholder="Optional description">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeCfgModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="submitConfig()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+let flags   = [];
+let configs = [];
+let editingFlagId   = null;
+let editingConfigId = null;
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+const api = async (method, path, body) => {
+  const r = await fetch(path, {
+    method,
+    headers: body ? {'Content-Type':'application/json'} : {},
+    body:    body ? JSON.stringify(body) : undefined,
+  });
+  return r;
+};
+
+// ── Load ──────────────────────────────────────────────────────────────────────
+async function loadAll() {
+  const [fr, cr] = await Promise.all([
+    fetch('/flags/'), fetch('/configs/')
+  ]);
+  flags   = await fr.json();
+  configs = await cr.json();
+  renderFlags();
+  renderConfigs();
+}
+
+async function loadAudit() {
+  const r    = await fetch('/audit/?limit=200');
+  const data = await r.json();
+  renderAudit(data);
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+  if (name === 'audit') loadAudit();
+}
+
+// ── Render flags ──────────────────────────────────────────────────────────────
+function targetingBadge(t) {
+  switch (t?.type) {
+    case 'everyone':   return '<span class="badge badge-everyone">Everyone</span>';
+    case 'beta_users': return '<span class="badge badge-beta">Beta Users</span>';
+    case 'percentage': return `<span class="badge badge-pct">${t.percentage ?? 0}% Rollout</span>`;
+    case 'user_ids':   return `<span class="badge badge-users">${(t.user_ids||[]).length} User(s)</span>`;
+    default:           return '';
+  }
+}
+
+function renderFlags() {
+  const q    = (document.getElementById('flagSearch').value || '').toLowerCase();
+  const list = flags.filter(f =>
+    f.name.toLowerCase().includes(q) ||
+    (f.description || '').toLowerCase().includes(q)
+  );
+
+  const on  = flags.filter(f => f.enabled).length;
+  const off = flags.length - on;
+  document.getElementById('flagStats').innerHTML = `
+    <div class="stat"><span class="stat-val val-total">${flags.length}</span><span class="stat-label">Total</span></div>
+    <div class="stat"><span class="stat-val val-on">${on}</span><span class="stat-label">Enabled</span></div>
+    <div class="stat"><span class="stat-val val-off">${off}</span><span class="stat-label">Disabled</span></div>
+  `;
+
+  const grid = document.getElementById('flagGrid');
+  if (!list.length) {
+    grid.innerHTML = `<div class="empty"><div class="icon">🚩</div>No flags found</div>`;
+    return;
+  }
+
+  grid.innerHTML = list.map(f => `
+    <div class="flag-card ${f.enabled ? 'enabled' : 'disabled'}" id="card-${f.id}">
+      <div class="flag-header">
+        <span class="flag-name">${esc(f.name)}</span>
+        <label class="toggle" title="Toggle ${esc(f.name)}">
+          <input type="checkbox" ${f.enabled ? 'checked' : ''}
+                 onchange="toggleFlag('${f.id}', this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="flag-meta">
+        ${targetingBadge(f.targeting)}
+      </div>
+      ${f.description ? `<div class="flag-desc">${esc(f.description)}</div>` : ''}
+      <div class="flag-actions">
+        <button class="btn btn-ghost" onclick="openFlagModal('${f.id}')">Edit</button>
+        <button class="btn btn-danger" onclick="deleteFlag('${f.id}','${esc(f.name)}')">Delete</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function toggleFlag(id, enabled) {
+  const r = await api('PATCH', `/flags/${id}`, { enabled });
+  if (!r.ok) { toast('Toggle failed', 'error'); await loadAll(); }
+}
+
+async function deleteFlag(id, name) {
+  if (!confirm(`Delete flag "${name}"?`)) return;
+  const r = await api('DELETE', `/flags/${id}`);
+  if (r.ok) toast(`Deleted "${name}"`, 'ok');
+  else      toast('Delete failed', 'error');
+  await loadAll();
+}
+
+// ── Render configs ────────────────────────────────────────────────────────────
+function renderConfigs() {
+  const q    = (document.getElementById('cfgSearch').value || '').toLowerCase();
+  const list = configs.filter(c =>
+    c.key.toLowerCase().includes(q) ||
+    (c.description || '').toLowerCase().includes(q)
+  );
+  const body = document.getElementById('cfgBody');
+  if (!list.length) {
+    body.innerHTML = `<tr><td colspan="6" class="empty" style="text-align:center;padding:40px;color:var(--muted)">No configs found</td></tr>`;
+    return;
+  }
+  body.innerHTML = list.map(c => `
+    <tr>
+      <td class="mono">${esc(c.key)}</td>
+      <td class="mono" style="color:var(--on)">${esc(c.value)}</td>
+      <td><span class="type-badge type-${c.type}">${c.type}</span></td>
+      <td style="color:var(--muted)">${esc(c.description || '')}</td>
+      <td style="color:var(--muted);font-size:11px">${(c.updated_at||'').slice(0,10)}</td>
+      <td>
+        <button class="btn btn-ghost" style="padding:3px 8px;font-size:11px"
+                onclick="openCfgModal('${c.id}')">Edit</button>
+        <button class="btn btn-danger" style="padding:3px 8px;font-size:11px"
+                onclick="deleteConfig('${c.id}','${esc(c.key)}')">Del</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function deleteConfig(id, key) {
+  if (!confirm(`Delete config "${key}"?`)) return;
+  const r = await api('DELETE', `/configs/${id}`);
+  if (r.ok) toast(`Deleted "${key}"`, 'ok');
+  else      toast('Delete failed', 'error');
+  await loadAll();
+}
+
+// ── Render audit ──────────────────────────────────────────────────────────────
+function renderAudit(entries) {
+  document.getElementById('auditCount').textContent =
+    `${entries.length} entries`;
+  const el = document.getElementById('auditList');
+  if (!entries.length) {
+    el.innerHTML = `<div class="empty"><div class="icon">📋</div>No audit entries yet</div>`;
+    return;
+  }
+  el.innerHTML = [...entries].reverse().map(e => {
+    const ts      = (e.ts || '').replace('T',' ').slice(0,19);
+    const changes = Object.keys(e.changes||{}).length
+      ? JSON.stringify(e.changes) : '';
+    return `
+      <div class="audit-entry">
+        <span class="audit-ts">${ts}</span>
+        <span class="audit-action act-${e.action}">${e.action}</span>
+        <span style="color:var(--muted);font-size:11px">${e.entity_type}</span>
+        <span class="audit-name">${esc(e.entity_name)}</span>
+        ${changes ? `<span class="audit-changes">${esc(changes)}</span>` : ''}
+      </div>`;
+  }).join('');
+}
+
+// ── Flag modal ────────────────────────────────────────────────────────────────
+function onTargetingChange() {
+  const v = document.getElementById('fTargeting').value;
+  document.getElementById('pctField').style.display  = v === 'percentage' ? '' : 'none';
+  document.getElementById('uidsField').style.display = v === 'user_ids'   ? '' : 'none';
+}
+
+function openFlagModal(flagId) {
+  editingFlagId = flagId || null;
+  const flag    = flagId ? flags.find(f => f.id === flagId) : null;
+  document.getElementById('flagModalTitle').textContent =
+    flag ? `Edit Flag: ${flag.name}` : 'New Feature Flag';
+  document.getElementById('nameField').style.display = flag ? 'none' : '';
+  document.getElementById('fName').value    = '';
+  document.getElementById('fDesc').value    = flag?.description || '';
+  const t = flag?.targeting || {};
+  document.getElementById('fTargeting').value = t.type || 'everyone';
+  document.getElementById('fPct').value       = t.percentage ?? '';
+  document.getElementById('fUids').value      = (t.user_ids||[]).join(', ');
+  document.getElementById('fEnabled').value   = flag?.enabled ? 'true' : 'false';
+  onTargetingChange();
+  document.getElementById('flagModal').classList.add('open');
+}
+
+function closeFlagModal() {
+  document.getElementById('flagModal').classList.remove('open');
+  editingFlagId = null;
+}
+
+async function submitFlag() {
+  const tType = document.getElementById('fTargeting').value;
+  const targeting = { type: tType };
+  if (tType === 'percentage')
+    targeting.percentage = parseFloat(document.getElementById('fPct').value) || 0;
+  if (tType === 'user_ids')
+    targeting.user_ids = document.getElementById('fUids').value
+      .split(',').map(s => s.trim()).filter(Boolean);
+
+  const payload = {
+    description: document.getElementById('fDesc').value.trim(),
+    targeting,
+    enabled: document.getElementById('fEnabled').value === 'true',
+  };
+
+  let r;
+  if (editingFlagId) {
+    r = await api('PATCH', `/flags/${editingFlagId}`, payload);
+  } else {
+    const name = document.getElementById('fName').value.trim();
+    if (!name) { toast('Name is required', 'error'); return; }
+    r = await api('POST', '/flags/', { ...payload, name });
+  }
+
+  if (r.ok) {
+    toast(editingFlagId ? 'Flag updated' : 'Flag created', 'ok');
+    closeFlagModal();
+    await loadAll();
+  } else {
+    const err = await r.json().catch(() => ({}));
+    toast(err.detail || `Error ${r.status}`, 'error');
+  }
+}
+
+// ── Config modal ──────────────────────────────────────────────────────────────
+function openCfgModal(cfgId) {
+  editingConfigId = cfgId || null;
+  const cfg = cfgId ? configs.find(c => c.id === cfgId) : null;
+  document.getElementById('cfgModalTitle').textContent =
+    cfg ? `Edit Config: ${cfg.key}` : 'New Remote Config';
+  document.getElementById('cfgKeyField').style.display = cfg ? 'none' : '';
+  document.getElementById('cKey').value   = '';
+  document.getElementById('cValue').value = cfg?.value || '';
+  document.getElementById('cType').value  = cfg?.type  || 'string';
+  document.getElementById('cDesc').value  = cfg?.description || '';
+  document.getElementById('cfgModal').classList.add('open');
+}
+
+function closeCfgModal() {
+  document.getElementById('cfgModal').classList.remove('open');
+  editingConfigId = null;
+}
+
+async function submitConfig() {
+  const payload = {
+    value:       document.getElementById('cValue').value.trim(),
+    type:        document.getElementById('cType').value,
+    description: document.getElementById('cDesc').value.trim(),
+  };
+  if (!payload.value) { toast('Value is required', 'error'); return; }
+
+  let r;
+  if (editingConfigId) {
+    r = await api('PATCH', `/configs/${editingConfigId}`, payload);
+  } else {
+    const key = document.getElementById('cKey').value.trim();
+    if (!key) { toast('Key is required', 'error'); return; }
+    r = await api('POST', '/configs/', { ...payload, key });
+  }
+
+  if (r.ok) {
+    toast(editingConfigId ? 'Config updated' : 'Config created', 'ok');
+    closeCfgModal();
+    await loadAll();
+  } else {
+    const err = await r.json().catch(() => ({}));
+    toast(err.detail || `Error ${r.status}`, 'error');
+  }
+}
+
+// ── Export ────────────────────────────────────────────────────────────────────
+async function doExport() {
+  const [fr, cr] = await Promise.all([fetch('/flags/'), fetch('/configs/')]);
+  const payload  = {
+    version: '1.0',
+    exported_at: new Date().toISOString(),
+    flags:   await fr.json(),
+    configs: await cr.json(),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const a    = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `flags-export-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  toast('Export downloaded', 'ok');
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function toast(msg, type = 'ok') {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.style.borderLeftColor = type === 'ok' ? 'var(--on)' : 'var(--off)';
+  el.textContent = (type === 'ok' ? '✔  ' : '✖  ') + msg;
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => el.remove(), 3000);
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── WebSocket ─────────────────────────────────────────────────────────────────
+function connectWS() {
+  const url  = `ws://${location.host}/ws`;
+  const ws   = new WebSocket(url);
+  const dot  = document.getElementById('wsDot');
+  const lbl  = document.getElementById('wsLabel');
+
+  ws.onopen = () => {
+    dot.classList.add('connected');
+    lbl.textContent = 'connected';
+  };
+  ws.onclose = ws.onerror = () => {
+    dot.classList.remove('connected');
+    lbl.textContent = 'reconnecting…';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = async ({ data }) => {
+    const msg   = JSON.parse(data);
+    const event = msg.event;
+    const d     = msg.data;
+
+    switch (event) {
+      case 'initial_state':
+        flags   = d.flags;
+        configs = d.configs;
+        renderFlags();
+        renderConfigs();
+        break;
+
+      case 'flag_created':
+        flags = [...flags, d];
+        renderFlags();
+        toast(`Flag "${d.name}" created`, 'ok');
+        break;
+      case 'flag_updated':
+        flags = flags.map(f => f.id === d.id ? d : f);
+        renderFlags();
+        break;
+      case 'flag_deleted':
+        flags = flags.filter(f => f.id !== d.id);
+        renderFlags();
+        toast('Flag deleted', 'ok');
+        break;
+
+      case 'config_created':
+        configs = [...configs, d];
+        renderConfigs();
+        toast(`Config "${d.key}" created`, 'ok');
+        break;
+      case 'config_updated':
+        configs = configs.map(c => c.id === d.id ? d : c);
+        renderConfigs();
+        break;
+      case 'config_deleted':
+        configs = configs.filter(c => c.id !== d.id);
+        renderConfigs();
+        toast('Config deleted', 'ok');
+        break;
+    }
+  };
+}
+
+// ── Close modals on overlay click ─────────────────────────────────────────────
+document.getElementById('flagModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeFlagModal();
+});
+document.getElementById('cfgModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) closeCfgModal();
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+connectWS();
+loadAll();
+</script>
+</body>
+</html>

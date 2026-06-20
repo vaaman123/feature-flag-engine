@@ -1,0 +1,23 @@
+name: feature_flag_flutter
+description: >
+  Optimised Flutter SDK for the self-hosted Feature Flag & Remote Config Engine.
+  Real-time WebSocket updates, all four targeting rules, typed remote configs,
+  offline persistence via SharedPreferences, and exponential-backoff reconnect.
+version: 1.1.0
+homepage: https://github.com/your-org/feature-flag-engine
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+  flutter: ">=3.10.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  web_socket_channel: ^2.4.0
+  shared_preferences: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
