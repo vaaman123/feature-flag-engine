@@ -693,8 +693,9 @@ function esc(s) {
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
 function connectWS() {
-  const url  = `ws://${location.host}/ws`;
-  const ws   = new WebSocket(url);
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const url   = `${proto}//${location.host}/ws`;
+  const ws    = new WebSocket(url);
   const dot  = document.getElementById('wsDot');
   const lbl  = document.getElementById('wsLabel');
 
