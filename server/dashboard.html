@@ -459,7 +459,7 @@ function renderFlags() {
         <span class="flag-name">${esc(f.name)}</span>
         <label class="toggle" title="Toggle ${esc(f.name)}">
           <input type="checkbox" ${f.enabled ? 'checked' : ''}
-                 onchange="toggleFlag('${f.id}', this.checked)">
+                 onchange="toggleFlag('${f.id}', '${esc(f.name)}', this.checked)">
           <span class="slider"></span>
         </label>
       </div>
@@ -475,9 +475,14 @@ function renderFlags() {
   `).join('');
 }
 
-async function toggleFlag(id, enabled) {
+async function toggleFlag(id, name, enabled) {
   const r = await api('PATCH', `/flags/${id}`, { enabled });
-  if (!r.ok) { toast('Toggle failed', 'error'); await loadAll(); }
+  if (r.ok) {
+    toast(`"${name}" turned ${enabled ? 'ON ✅' : 'OFF ❌'}`, 'ok');
+  } else {
+    toast('Toggle failed', 'error');
+    await loadAll();
+  }
 }
 
 async function deleteFlag(id, name) {
