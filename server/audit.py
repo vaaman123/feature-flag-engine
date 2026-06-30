@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 _BASE_DIR   = Path(__file__).resolve().parent
 AUDIT_FILE  = _BASE_DIR / "data/audit.jsonl"
@@ -33,7 +35,7 @@ def write_audit(
     changes:     Dict[str, Any],
 ) -> None:
     entry = {
-        "ts":          datetime.now(timezone.utc).isoformat(),
+        "ts":          datetime.now(IST).isoformat(),
         "action":      action,
         "entity_type": entity_type,
         "entity_id":   entity_id,

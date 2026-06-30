@@ -43,10 +43,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
 import httpx
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 DEFAULT_SERVER = "http://localhost:8000"
 
@@ -288,7 +290,7 @@ def cmd_export(client: httpx.Client, output_path: str | None) -> None:
     configs = client.get("/configs/").json()
     payload = {
         "version":     "1.0",
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(IST).isoformat(),
         "flags":       flags,
         "configs":     configs,
     }

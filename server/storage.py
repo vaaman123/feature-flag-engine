@@ -26,9 +26,11 @@ import atexit
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 from models import FeatureFlag, RemoteConfig
 
@@ -71,7 +73,7 @@ def _fire_callbacks() -> None:
 # ─── Core I/O ────────────────────────────────────────────────────────────────
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(IST).isoformat()
 
 
 def _build_indexes(data: Dict[str, Any]) -> None:

@@ -4,12 +4,14 @@ Pydantic models for the Feature Flag Engine.
 from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import Optional, List, Literal
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import uuid
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(IST).isoformat()
 
 
 def _uuid() -> str:
